@@ -250,22 +250,22 @@ def test_the_introspection_gate_reports_what_the_deployed_api_answers() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_finalize_and_reopen_have_no_mutation_and_are_declared_builder_only() -> None:
-    """§5's mutations are Stage 5's barrier, so those two states are builder-produced and labelled.
+def test_finalize_is_live_and_reopen_remains_a_builder_fixture() -> None:
+    """§5.2 now writes FINALIZED; §5.3 remains unshipped, so REOPENED is still a labelled fixture.
 
-    The states are not missing from the fixture set — §3.6.2 and API-FIX-01 both require them — and the
-    module says out loud how they were made, which is what lets a reviewer tell a fixture apart from a
-    finalization the product actually ran.
+    The two states are both in the fixture set (§3.6.2 and API-FIX-01). The note says out loud
+    how they were made, which is what lets a reviewer tell a builder-produced fixture apart
+    from a finalization the product actually ran.
     """
     sdl = _sdl()
-    assert not stage2._field_exists(sdl, "Mutation", "finalizeShowAndSell")
+    assert stage2._field_exists(sdl, "Mutation", "finalizeShowAndSell")
     assert not stage2._field_exists(sdl, "Mutation", "reopenShowAndSell")
     assert stage3.STAGE_THREE_BUILDER_ONLY_STATE_FIXTURES == (
         show_and_sell_models.STATUS_FINALIZED,
         show_and_sell_models.STATUS_REOPENED,
     )
     for state in stage3.STAGE_THREE_BUILDER_ONLY_STATE_FIXTURES:
-        assert state in sdl  # the enum carries the state; only the write is missing
+        assert state in sdl  # the enum carries both states even though one write is still a fixture
     note = stage3.BUILDER_ONLY_STATE_FIXTURE_NOTE
     assert "finalizeShowAndSell" in note and "fixture" in note and "§5" in note
 

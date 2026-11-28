@@ -1151,6 +1151,7 @@ def list_inventory_movements(
     profile_id: Optional[str] = None,
     start_at: Optional[str] = None,
     end_at: Optional[str] = None,
+    consistent: bool = False,
 ) -> List[Dict[str, Any]]:
     """One campaign's movement history, with §5.8 filters applied by the read.
 
@@ -1160,6 +1161,9 @@ def list_inventory_movements(
     campaign's audit history is one partition's worth of rows, and filtering after
     the key range is cheaper and always correct, unlike an index read that may be
     behind the write being audited.
+
+    ``consistent=True`` is for a mutation reading back its own committed movement
+    facts: an eventually consistent replica can omit the row this request just wrote.
 
     Which rows are movements is decided by the ``entityType`` attribute, never by
     the sort key. DynamoDB rejects a Query whose ``FilterExpression`` names a key
@@ -1225,6 +1229,10 @@ def list_inventory_movements(
         # The ``entityType`` filter is unconditional, so every history read carries one.
         "FilterExpression": " and ".join(filters),
     }
+    if consistent:
+        # A mutation's own result must not be missed because a replica lagged the
+        # commit; an audit page is happy with the cheaper eventual read.
+        query["ConsistentRead"] = True
     rows = query_all_items(tables.inventory, query)
     # Newest-first is a business-time order, and the key order is product-first:
     # a campaign-wide page would otherwise show one product's whole history before

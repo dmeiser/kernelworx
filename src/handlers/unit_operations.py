@@ -157,6 +157,7 @@ UNIT_SCOUT_ORDERS_FIELD = "unitScoutCampaignOrders"
 CREATE_SHOW_AND_SELL_FIELD = "createShowAndSell"
 UPDATE_SHOW_AND_SELL_FIELD = "updateShowAndSell"
 UPDATE_ROUNDING_DRAFT_FIELD = "updateShowAndSellRoundingDraft"
+FINALIZE_SHOW_AND_SELL_FIELD = "finalizeShowAndSell"
 CANCEL_SHOW_AND_SELL_FIELD = "cancelShowAndSell"
 SHOW_AND_SELL_FIELD = "showAndSell"
 SHOW_AND_SELLS_FIELD = "showAndSells"
@@ -5120,7 +5121,7 @@ def _assign_show_and_sell_inventory(event: Dict[str, Any], caller_id: str) -> Di
     runner.stage_marker(plan, keys, fingerprint=fingerprint, result_id=event_id)
     if reopened:
         product_ids = allocation_models.draft_product_ids(event_row, targets)
-        allocation_models.require_finalization_feasible(len(product_ids), MAX_TRANSACTION_ACTIONS)
+        _require_event_finalization_feasible(event_row, len(product_ids))
         plan.add(
             *show_and_sell_models.assignment_draft_action(
                 show_and_sell_id=event_id,
@@ -5135,7 +5136,7 @@ def _assign_show_and_sell_inventory(event: Dict[str, Any], caller_id: str) -> Di
     else:
         changes = _plan_live_assignments(event_row, targets, sections, event_id)
         product_ids = allocation_models.planned_product_ids(event_row, changes)
-        allocation_models.require_finalization_feasible(len(product_ids), MAX_TRANSACTION_ACTIONS)
+        _require_event_finalization_feasible(event_row, len(product_ids))
         _stage_assignment_writes(
             plan,
             event_row,
@@ -5963,6 +5964,68 @@ def _refuse_signup_overlap(
     )
 
 
+def _event_obligation_count(event_id: str) -> int:
+    """Every We Owe row finalization will condition-check, whatever its current state."""
+    return sum(
+        1
+        for row in show_and_sell_models.event_we_owe_rows(event_id)
+        if str(row.get("entityType")) == show_and_sell_sale_models.WE_OWE_ENTITY_TYPE
+    )
+
+
+def _event_sale_count(event_id: str) -> int:
+    """Every active sale finalization will snapshot and condition-check."""
+    return sum(
+        1
+        for row in show_and_sell_sale_models.event_sale_rows(event_id)
+        if str(row.get(show_and_sell_sale_models.STATUS_ATTRIBUTE) or "")
+        == show_and_sell_sale_models.SALE_STATUS_ACTIVE
+    )
+
+
+def _event_work_counts(event_id: str) -> Tuple[int, int]:
+    """The confirmed work rows and distinct Scouts an event currently carries."""
+    confirmed = 0
+    scouts: set[str] = set()
+    for signup in show_and_sell_models.active_signups(event_id):
+        if int(signup.get(show_and_sell_models.ACTUAL_MINUTES_ATTRIBUTE) or 0) > 0:
+            confirmed += 1
+            scouts.add(str(signup[show_and_sell_models.PROFILE_ID_ATTRIBUTE]))
+    return confirmed, len(scouts)
+
+
+def _require_event_finalization_feasible(
+    event_row: Mapping[str, Any],
+    product_count: int,
+    *,
+    sale_delta: int = 0,
+    obligation_delta: int = 0,
+    confirmed_work_rows: Optional[int] = None,
+    participating_scouts: Optional[int] = None,
+) -> None:
+    """Price the finalization a source mutation would leave behind, before it writes.
+
+    Every source of finalization inputs has to answer the same §8.10 question: after this
+    mutation lands, can approval still publish inside one transaction? The event supplies
+    the sale, work, participant and obligation counts; the caller supplies only the product
+    count it is changing (or the work counts its pending batch will change). Signup
+    confirmation, work confirmation, stock assignment and sale entry/correction all call
+    this guard, so an event admitted by preflight can still be approved in one transaction.
+    That keeps the guard invariant under mutation order — sales before work and work before
+    sales are priced by the same arithmetic.
+    """
+    event_id = str(event_row[show_and_sell_models.SHOW_AND_SELL_ID_ATTRIBUTE])
+    default_work_rows, default_scouts = _event_work_counts(event_id)
+    allocation_models.require_finalization_feasible(
+        product_count,
+        MAX_TRANSACTION_ACTIONS,
+        confirmed_work_rows=default_work_rows if confirmed_work_rows is None else confirmed_work_rows,
+        participating_scouts=default_scouts if participating_scouts is None else participating_scouts,
+        sale_count=_event_sale_count(event_id) + sale_delta,
+        we_owe_count=_event_obligation_count(event_id) + obligation_delta,
+    )
+
+
 def _refuse_signup_budget(event_row: Mapping[str, Any], signups: Sequence[Mapping[str, Any]], profile_id: str) -> None:
     """Refuse a signup this event could no longer finalize inside one transaction (§8.10).
 
@@ -5975,9 +6038,9 @@ def _refuse_signup_budget(event_row: Mapping[str, Any], signups: Sequence[Mappin
     profiles = {str(row.get(show_and_sell_models.PROFILE_ID_ATTRIBUTE) or "") for row in signups}
     profiles.add(profile_id)
     confirmed = sum(1 for row in signups if int(row.get(show_and_sell_models.ACTUAL_MINUTES_ATTRIBUTE) or 0) > 0)
-    allocation_models.require_finalization_feasible(
+    _require_event_finalization_feasible(
+        event_row,
         len(show_and_sell_models.event_allocations(event_row)),
-        MAX_TRANSACTION_ACTIONS,
         confirmed_work_rows=confirmed,
         participating_scouts=len(profiles),
     )
@@ -6400,11 +6463,12 @@ def _work_preview(event_row: Mapping[str, Any], rows: Sequence[Mapping[str, Any]
     lower bound, and the answer says nothing about credit — approving credit is
     finalization's decision, not this read's.
     """
+    event_id = str(event_row[show_and_sell_models.SHOW_AND_SELL_ID_ATTRIBUTE])
     batch = {(str(row["slotId"]), str(row["profileId"])): int(row["actualMinutes"]) for row in rows}
     total_minutes = 0
     confirmed_rows = 0
     scouts: set[str] = set()
-    for signup in show_and_sell_models.active_signups(str(event_row[show_and_sell_models.SHOW_AND_SELL_ID_ATTRIBUTE])):
+    for signup in show_and_sell_models.active_signups(event_id):
         key_pair = (
             str(signup[show_and_sell_models.SLOT_ID_ATTRIBUTE]),
             str(signup[show_and_sell_models.PROFILE_ID_ATTRIBUTE]),
@@ -6427,6 +6491,8 @@ def _work_preview(event_row: Mapping[str, Any], rows: Sequence[Mapping[str, Any]
             len(show_and_sell_models.event_allocations(event_row)),
             confirmed_work_rows=confirmed_rows,
             participating_scouts=len(scouts),
+            sale_count=_event_sale_count(event_id),
+            we_owe_count=_event_obligation_count(event_id),
         ),
     }
 
@@ -6441,9 +6507,9 @@ def _refuse_work_budget(event_row: Mapping[str, Any], rows: Sequence[Mapping[str
     reason has to know which number moved.
     """
     preview = _work_preview(event_row, rows)
-    allocation_models.require_finalization_feasible(
+    _require_event_finalization_feasible(
+        event_row,
         len(show_and_sell_models.event_allocations(event_row)),
-        MAX_TRANSACTION_ACTIONS,
         confirmed_work_rows=int(preview["confirmedWorkRows"]),
         participating_scouts=int(preview["confirmedParticipants"]),
     )
@@ -6968,6 +7034,955 @@ def _rounding_draft_answer(event_id: str) -> Dict[str, Any]:
     what some other writer has since changed.
     """
     return _finalization_preview_for_row(dict(show_and_sell_models.load_show_and_sell_or_not_found(event_id)))
+
+
+# --- First finalization (§5.2) -------------------------------------------------
+
+
+def _parse_return_answers(raw_returns: Any) -> Dict[str, Tuple[int, Optional[str]]]:
+    """One actual count per allocated product; a duplicate is a refusal, not a merge."""
+    if not isinstance(raw_returns, list) or not all(isinstance(entry, Mapping) for entry in raw_returns):
+        raise AppError(ErrorCode.INVALID_INPUT, "returns is required and must be a list of product returns")
+    returns: Dict[str, Tuple[int, Optional[str]]] = {}
+    for entry in raw_returns:
+        product_id = inventory_models.normalize_inventory_id(entry.get("productId"), "returns.productId")
+        if product_id in returns:
+            raise AppError(
+                ErrorCode.INVALID_INPUT, f"returns names {product_id} twice; one actual count is required per product"
+            )
+        returns[product_id] = (
+            inventory_models.normalize_quantity(entry.get("actualQty"), "returns.actualQty"),
+            entry.get("reason"),
+        )
+    return returns
+
+
+def _parse_cash_answer(raw_cash: Any, calculated_cash: int) -> Dict[str, Any]:
+    """The counted cash and its two explanations; the arithmetic is recomputed here."""
+    if not isinstance(raw_cash, Mapping) or "actualCashCents" not in raw_cash:
+        raise AppError(ErrorCode.INVALID_INPUT, "cash.actualCashCents is required")
+    return dict(
+        show_and_sell_finalization_models.cash_reconciliation(
+            calculated_expected_cents=calculated_cash,
+            manual_adjustment_cents=raw_cash.get("manualAdjustmentCents", 0),
+            manual_adjustment_reason=raw_cash.get("manualAdjustmentReason"),
+            actual_cash_cents=raw_cash["actualCashCents"],
+            discrepancy_explanation=raw_cash.get("discrepancyExplanation"),
+        )
+    )
+
+
+def _parse_rounding_answer(raw_assignments: Any) -> Dict[str, int]:
+    """The unassigned-cent assignments, in the draft's own dialect."""
+    if not isinstance(raw_assignments, list) or not all(isinstance(entry, Mapping) for entry in raw_assignments):
+        raise AppError(
+            ErrorCode.INVALID_INPUT, "roundingAssignments is required and must be a list of {profileId, cents}"
+        )
+    return dict(
+        show_and_sell_finalization_models.normalize_rounding_assignments([dict(entry) for entry in raw_assignments])
+    )
+
+
+def _finalization_input(
+    payload: Mapping[str, Any], calculated_cash: int
+) -> Tuple[Dict[str, Tuple[int, Optional[str]]], Dict[str, Any], Dict[str, int]]:
+    """The three complete answers an approval must carry, normalized before any read."""
+    return (
+        _parse_return_answers(payload.get("returns")),
+        _parse_cash_answer(payload.get("cash"), calculated_cash),
+        _parse_rounding_answer(payload.get("roundingAssignments")),
+    )
+
+
+def _version_check(
+    table_name: str, key: Mapping[str, str], expected_version: int, attribute: str = "version"
+) -> Tuple[str, Dict[str, Any]]:
+    """One source row's version guard, staged beside the writes it authorizes.
+
+    First finalization reads sales, signups and open We Owe obligations as inputs and
+    copies them into immutable rows. Without a condition on each source, a sale or
+    confirmed minute that changed during the read would be frozen at a version that
+    no longer describes it — the source version is part of the snapshot's meaning.
+    """
+    return (
+        "ConditionCheck",
+        {
+            "TableName": table_name,
+            "Key": wire_key(dict(key)),
+            "ConditionExpression": "#version = :expectedVersion",
+            "ExpressionAttributeNames": {"#version": attribute},
+            "ExpressionAttributeValues": {":expectedVersion": wire_value(expected_version)},
+            "ReturnValuesOnConditionCheckFailure": "ALL_OLD",
+        },
+    )
+
+
+def _put_new_row(table_name: str, row: Mapping[str, Any]) -> Tuple[str, Dict[str, Any]]:
+    """Insert one immutable finalization row; a collision cancels the whole plan."""
+    return (
+        "Put",
+        {
+            "TableName": table_name,
+            "Item": show_and_sell_models.wire_item(row),
+            "ConditionExpression": "attribute_not_exists(#pk) AND attribute_not_exists(#sk)",
+            "ExpressionAttributeNames": {"#pk": "pk", "#sk": "sk"},
+            "ReturnValuesOnConditionCheckFailure": "ALL_OLD",
+        },
+    )
+
+
+def _finalization_event_action(
+    event_id: str, expected_version: int, finalization_id: str, caller_id: str, now_iso: str
+) -> Tuple[str, Dict[str, Any]]:
+    """Publish the approval pointer and the FINALIZED state in the event's own write.
+
+    This is the single finalization write owner: no other resolver writes
+    ``approvedFinalizationId``, ``latestFinalizationId`` or a FINALIZED status.
+    The version condition serializes two approving Kernels on the event row, so the
+    loser's whole plan cancels rather than appending a second approved version.
+    """
+    return (
+        "Update",
+        {
+            "TableName": tables.show_and_sells.table_name,
+            "Key": wire_key(show_and_sell_models.event_metadata_key(event_id)),
+            "UpdateExpression": (
+                "SET #status = :status, #approved = :approved, #latest = :latest, "
+                "#version = :nextVersion, #updatedBy = :updatedBy, #updatedAt = :updatedAt"
+            ),
+            "ConditionExpression": "#version = :expectedVersion",
+            "ExpressionAttributeNames": {
+                "#status": show_and_sell_models.STATUS_ATTRIBUTE,
+                "#approved": show_and_sell_models.APPROVED_FINALIZATION_ID_ATTRIBUTE,
+                "#latest": show_and_sell_models.LATEST_FINALIZATION_ID_ATTRIBUTE,
+                "#version": show_and_sell_models.VERSION_ATTRIBUTE,
+                "#updatedBy": show_and_sell_models.UPDATED_BY_ATTRIBUTE,
+                "#updatedAt": show_and_sell_models.UPDATED_AT_ATTRIBUTE,
+            },
+            "ExpressionAttributeValues": {
+                ":status": wire_value(show_and_sell_models.STATUS_FINALIZED),
+                ":approved": wire_value(finalization_id),
+                ":latest": wire_value(finalization_id),
+                ":expectedVersion": wire_value(expected_version),
+                ":nextVersion": wire_value(expected_version + 1),
+                ":updatedBy": wire_value(caller_id),
+                ":updatedAt": wire_value(now_iso),
+            },
+            "ReturnValuesOnConditionCheckFailure": "ALL_OLD",
+        },
+    )
+
+
+def _finalized_event_row(
+    event_row: Mapping[str, Any], expected_version: int, finalization_id: str, caller_id: str, now_iso: str
+) -> Dict[str, Any]:
+    """The event as the committed plan leaves it, for the answer and marker payload."""
+    row = dict(event_row)
+    row[show_and_sell_models.STATUS_ATTRIBUTE] = show_and_sell_models.STATUS_FINALIZED
+    row[show_and_sell_models.APPROVED_FINALIZATION_ID_ATTRIBUTE] = finalization_id
+    row[show_and_sell_models.LATEST_FINALIZATION_ID_ATTRIBUTE] = finalization_id
+    row[show_and_sell_models.VERSION_ATTRIBUTE] = expected_version + 1
+    row[show_and_sell_models.UPDATED_BY_ATTRIBUTE] = caller_id
+    row[show_and_sell_models.UPDATED_AT_ATTRIBUTE] = now_iso
+    return row
+
+
+def _finalization_credit_rows(
+    finalization: Mapping[str, Any],
+    shares: Mapping[str, int],
+    campaign_by_profile: Mapping[str, str],
+    minutes_by_profile: Mapping[str, int],
+    rounding: Mapping[str, int],
+    now_iso: str,
+) -> List[Dict[str, Any]]:
+    """The approved credit set, built once for both publication and validation."""
+    fm = show_and_sell_finalization_models
+    rows = [
+        fm.build_credit_row(
+            finalization=finalization,
+            campaign_id=campaign_by_profile[profile],
+            profile_id=profile,
+            actual_minutes=minutes_by_profile[profile],
+            base_amount_cents=shares[profile],
+            rounding_credit_cents=rounding.get(profile, 0),
+            created_at=now_iso,
+            updated_at=now_iso,
+        )
+        for profile in sorted(shares)
+    ]
+    fm.validate_credit_set(finalization, rows)
+    return rows
+
+
+def _return_movement(
+    *,
+    event_id: str,
+    campaign_id: str,
+    product_id: str,
+    movement_id: str,
+    variance: int,
+    expected: int,
+    reason: Optional[str],
+    balance_version: Optional[int],
+    finalization_id: str,
+    caller_id: str,
+    idempotency_key: str,
+    now_iso: str,
+) -> Dict[str, Any]:
+    """One ledger record for a returned remainder: release alone, or release plus variance."""
+    return cast(
+        Dict[str, Any],
+        inventory_models.build_inventory_movement_item(
+            movement_id=movement_id,
+            unit_campaign_id=campaign_id,
+            product_id=product_id,
+            movement_type=(inventory_models.EVENT_RETURN_RECONCILE if variance else inventory_models.EVENT_RELEASE),
+            actor_account_id=caller_id,
+            occurred_at=now_iso,
+            idempotency_key=idempotency_key,
+            kernel_physical_delta=variance,
+            assigned_delta=-expected,
+            show_and_sell_id=event_id,
+            finalization_id=finalization_id,
+            reason=reason if variance else None,
+            inventory_version=balance_version,
+        ),
+    )
+
+
+def _return_plans(
+    event_row: Mapping[str, Any],
+    returns: Mapping[str, Tuple[int, Optional[str]]],
+    finalization_id: str,
+    caller_id: str,
+    idempotency_key: str,
+    now_iso: str,
+) -> Tuple[List[Dict[str, Any]], Dict[str, Tuple[Optional[Dict[str, Any]], int]]]:
+    """Every product's return line, movement and balance target, computed once.
+
+    The allocation's remaining quantity becomes RELEASED on approval and the physical
+    variance is the only stock effect (FIN-03/04): a missing box lowers stock, an extra
+    one raises it, and neither a sale nor a Scout cent moves with it. Every release
+    writes one ledger movement: a matched return uses EVENT_RELEASE for the assigned
+    delta alone, while a variance uses EVENT_RETURN_RECONCILE for both deltas. A
+    variance must carry a reason, which the immutable return-line builder enforces
+    together with its linked movement id.
+    """
+    fm = show_and_sell_finalization_models
+    event_id = str(event_row[show_and_sell_models.SHOW_AND_SELL_ID_ATTRIBUTE])
+    campaign_id = str(event_row[show_and_sell_models.UNIT_CAMPAIGN_ID_ATTRIBUTE])
+    product_ids = show_and_sell_models.normalize_product_ids(event_row.get(show_and_sell_models.PRODUCT_IDS_ATTRIBUTE))
+    sections = inventory_models.campaign_product_sections(campaign_id, product_ids)
+    plans: List[Dict[str, Any]] = []
+    balances: Dict[str, Tuple[Optional[Dict[str, Any]], int]] = {}
+    for product_id in product_ids:
+        section = sections[product_id]
+        allocation = _event_allocation_row(section["allocations"], event_id)
+        if (allocation is None) or str(allocation.get("status")) != inventory_models.ALLOCATION_OPEN:
+            continue
+        if product_id not in returns:
+            raise AppError(
+                ErrorCode.INVALID_INPUT,
+                f"returns must name every allocated product; {product_id} has an open allocation",
+                details={"subcode": "RETURN_INPUT_INCOMPLETE", "productId": product_id},
+            )
+        actual, reason = returns[product_id]
+        allocated = int(allocation[inventory_models.ALLOCATED_QTY])
+        sold = int(allocation[inventory_models.SOLD_QTY])
+        expected = fm.expected_return_qty(allocated, sold)
+        variance = actual - expected
+        balance = _section_balance(section)
+        balance_version = int(balance["version"]) + 1 if balance is not None else 1
+        balances[product_id] = (balance, balance_version)
+        movement_id = inventory_models.new_inventory_movement_id()
+        line = fm.build_return_line_row(
+            show_and_sell_id=event_id,
+            finalization_id=finalization_id,
+            product_id=product_id,
+            allocated_qty=allocated,
+            expected_qty=expected,
+            actual_qty=actual,
+            # A matched return has no stock adjustment to link; its release is
+            # still audited, as an EVENT_RELEASE movement instead of a reconcile.
+            reconciliation_movement_id=movement_id if variance else None,
+            reason=reason if variance else None,
+        )
+        movement = _return_movement(
+            event_id=event_id,
+            campaign_id=campaign_id,
+            product_id=product_id,
+            movement_id=movement_id,
+            variance=variance,
+            expected=expected,
+            reason=reason,
+            balance_version=balance_version if balance is not None else None,
+            finalization_id=finalization_id,
+            caller_id=caller_id,
+            idempotency_key=idempotency_key,
+            now_iso=now_iso,
+        )
+        plans.append(
+            {
+                "productId": product_id,
+                "allocation": allocation,
+                "releasedQty": int(allocation[inventory_models.RELEASED_QTY]) + expected,
+                "remainingQty": 0,
+                "line": line,
+                "movement": movement,
+            }
+        )
+    return plans, balances
+
+
+def _competing_allocations(
+    event_row: Mapping[str, Any],
+    balances: Mapping[str, Tuple[Optional[Dict[str, Any]], int]],
+    sections: Mapping[str, Mapping[str, Any]],
+) -> Tuple[List[Dict[str, Any]], Dict[str, Dict[str, Any]], Dict[str, int]]:
+    """Classify other events' open allocations as earlier stock claims or later claims.
+
+    A finalized or cancelled competitor has already had its allocation released by its
+    own workflow, so it is skipped. Every surviving competitor's event row is read —
+    its version is guarded in the transaction — and the earlier ones' remainders are
+    removed from the sellable stock the later ones may claim.
+    """
+    event_id = str(event_row[show_and_sell_models.SHOW_AND_SELL_ID_ATTRIBUTE])
+    own_start = str(event_row[show_and_sell_models.START_AT_ATTRIBUTE])
+    later: List[Dict[str, Any]] = []
+    event_rows: Dict[str, Dict[str, Any]] = {}
+    earlier: Dict[str, int] = {}
+    for product_id, (_, version) in balances.items():
+        for row in sections[product_id]["allocations"]:
+            if (
+                str(row.get("status")) != inventory_models.ALLOCATION_OPEN
+                or str(row.get(show_and_sell_models.SHOW_AND_SELL_ID_ATTRIBUTE)) == event_id
+            ):
+                continue
+            other_id = str(row[show_and_sell_models.SHOW_AND_SELL_ID_ATTRIBUTE])
+            other = event_rows.setdefault(
+                other_id, dict(show_and_sell_models.load_show_and_sell_or_not_found(other_id))
+            )
+            if str(show_and_sell_models.derive_event_status(other)) in (
+                show_and_sell_models.STATUS_FINALIZED,
+                show_and_sell_models.STATUS_CANCELLED,
+            ):
+                continue
+            if str(other[show_and_sell_models.START_AT_ATTRIBUTE]) < own_start:
+                earlier[product_id] = earlier.get(product_id, 0) + int(row[inventory_models.REMAINING_QTY])
+            else:
+                later.append({"allocation": row, "productId": product_id, "eventRow": other, "version": version})
+    return later, event_rows, earlier
+
+
+def _reduction_rows(
+    later: Sequence[Mapping[str, Any]],
+    remaining: Dict[str, int],
+    stock_after_return: Mapping[str, int],
+    sections: Mapping[str, Mapping[str, Any]],
+    campaign_id: str,
+    finalization_id: str,
+    caller_id: str,
+    idempotency_key: str,
+    now_iso: str,
+) -> List[Dict[str, Any]]:
+    """Consume the remaining stock in start-time order, emitting one movement per cut."""
+    reductions: List[Dict[str, Any]] = []
+    for entry in later:
+        allocation = entry["allocation"]
+        product_id = str(entry["productId"])
+        requested = int(allocation[inventory_models.REMAINING_QTY])
+        target = min(requested, remaining[product_id])
+        remaining[product_id] -= target
+        reduction = requested - target
+        if not reduction:
+            continue
+        movement = inventory_models.build_inventory_movement_item(
+            movement_id=inventory_models.new_inventory_movement_id(),
+            unit_campaign_id=campaign_id,
+            product_id=product_id,
+            movement_type=inventory_models.EVENT_AUTO_REDUCE,
+            actor_account_id=caller_id,
+            occurred_at=now_iso,
+            idempotency_key=idempotency_key,
+            assigned_delta=-reduction,
+            show_and_sell_id=str(allocation[show_and_sell_models.SHOW_AND_SELL_ID_ATTRIBUTE]),
+            finalization_id=finalization_id,
+            inventory_version=entry["version"] if _section_balance(sections[product_id]) is not None else None,
+        )
+        reductions.append(
+            {
+                "allocation": allocation,
+                "movement": movement,
+                "productId": product_id,
+                "reduction": reduction,
+                "assignedQty": int(allocation[inventory_models.ALLOCATED_QTY]) - reduction,
+                # The warning is a fact of this approval, not a live position
+                # that a later edit could rewrite before the response is built.
+                "currentStockQty": stock_after_return[product_id],
+                "eventRow": entry["eventRow"],
+            }
+        )
+    return reductions
+
+
+def _later_reduction_plans(
+    event_row: Mapping[str, Any],
+    balances: Mapping[str, Tuple[Optional[Dict[str, Any]], int]],
+    return_plans: Sequence[Mapping[str, Any]],
+    finalization_id: str,
+    caller_id: str,
+    idempotency_key: str,
+    now_iso: str,
+) -> Tuple[List[Dict[str, Any]], Dict[str, Dict[str, Any]]]:
+    """Later open allocations, reduced by earlier-event priority in start-time order.
+
+    The sellable stock is the POST-reconciliation one: actual returns are counted
+    before any later claim is served, so a shortage cuts a later allocation further
+    and an overage lets it keep more. The reads cover every open allocation of the
+    touched products, so a concurrent change to any competing event's version
+    cancels the whole approval instead of letting one Kernel reduce a stock picture
+    another Kernel just changed.
+    """
+    campaign_id = str(event_row[show_and_sell_models.UNIT_CAMPAIGN_ID_ATTRIBUTE])
+    sections = inventory_models.campaign_product_sections(campaign_id, list(balances))
+    later, event_rows, earlier = _competing_allocations(event_row, balances, sections)
+    returned_delta = {
+        str(plan["productId"]): int(plan["movement"][inventory_models.KERNEL_PHYSICAL_DELTA]) for plan in return_plans
+    }
+    remaining = {
+        product_id: max(
+            0,
+            inventory_models.sellable_kernel_qty(balance)
+            + returned_delta.get(product_id, 0)
+            - earlier.get(product_id, 0),
+        )
+        for product_id, (balance, _) in balances.items()
+    }
+    later.sort(
+        key=lambda entry: (
+            str(entry["eventRow"][show_and_sell_models.START_AT_ATTRIBUTE]),
+            str(entry["eventRow"][show_and_sell_models.SHOW_AND_SELL_ID_ATTRIBUTE]),
+            str(entry["productId"]),
+        )
+    )
+    return (
+        _reduction_rows(
+            later,
+            remaining,
+            dict(remaining),
+            sections,
+            campaign_id,
+            finalization_id,
+            caller_id,
+            idempotency_key,
+            now_iso,
+        ),
+        event_rows,
+    )
+
+
+def _finalization_warnings(reductions: Sequence[Mapping[str, Any]]) -> List[Dict[str, Any]]:
+    """The earlier-event-priority warnings, in the order the reductions were applied.
+
+    Every number comes from the reduction this approval committed, not from a
+    position read afterwards: a later edit to the reduced event must not rewrite
+    what this finalization told its caller.
+    """
+    return [
+        {
+            "code": "AUTOMATIC_ALLOCATION_REDUCTION",
+            "productId": str(entry["productId"]),
+            "currentStockQty": int(entry["currentStockQty"]),
+            "assignedQty": int(entry["assignedQty"]),
+            "overageQty": int(entry["reduction"]),
+            "message": (
+                f"{entry['productId']}: an earlier event's final return left {int(entry['assignedQty'])} available; "
+                f"this event's allocation was reduced by {int(entry['reduction'])}."
+            ),
+        }
+        for entry in reductions
+    ]
+
+
+def _finalization_answer(
+    event_id: str, finalization_id: str, *, committed: Optional[Mapping[str, Any]] = None
+) -> Dict[str, Any]:
+    """The committed result, from this approval's plan or the frozen version row.
+
+    The first caller has the exact rows it wrote and the warnings it computed, so
+    an eventually consistent replica can never cost it its own credits or warnings.
+    The marker back-fill stores that same answer, and a replay returns it verbatim.
+    Only a marker whose payload back-fill never happened falls back to the version,
+    whose warning facts were committed with it and cannot be rewritten by a later
+    assignment edit or sale.
+    """
+    fm = show_and_sell_finalization_models
+    if committed is None:
+        event_row = dict(show_and_sell_models.load_show_and_sell_or_not_found(event_id))
+        row = fm.read_finalization(event_id, finalization_id)
+        if row is None:  # pragma: no cover - the marker only exists after the row committed
+            raise AppError(ErrorCode.INTERNAL_ERROR, "the approved finalization is missing after its commit")
+        credits = fm.finalization_credit_rows(event_id, finalization_id)
+        warnings = [dict(entry) for entry in row.get(fm.WARNINGS_ATTRIBUTE) or []]
+    else:
+        event_row = dict(committed["eventRow"])
+        row = dict(committed["finalization"])
+        credits = list(committed["credits"])
+        warnings = [dict(entry) for entry in committed["warnings"]]
+    product_ids = show_and_sell_models.normalize_product_ids(event_row.get(show_and_sell_models.PRODUCT_IDS_ATTRIBUTE))
+    campaign_id = str(event_row[show_and_sell_models.UNIT_CAMPAIGN_ID_ATTRIBUTE])
+    sections = inventory_models.campaign_product_sections(campaign_id, product_ids)
+    return {
+        "event": show_and_sell_models.event_admin_payload(event_row),
+        "finalization": fm.finalization_detail_payload(row),
+        "scoutAllocations": [fm.finalization_credit_payload(credit) for credit in credits],
+        "inventoryPositions": [
+            _position_payload(campaign_id, product_id, sections[product_id]) for product_id in product_ids
+        ],
+        "warnings": warnings,
+    }
+
+
+def _load_finalization_answer(stored_id: str) -> Dict[str, Any]:
+    """Rebuild the approval answer from its marker handle, ``eventId:finalizationId``."""
+    event_id, _, finalization_id = stored_id.partition(":")
+    return _finalization_answer(event_id, finalization_id)
+
+
+def _finalization_sources(
+    event_id: str, payload: Mapping[str, Any]
+) -> Tuple[
+    List[Dict[str, Any]],
+    Dict[str, Tuple[int, Optional[str]]],
+    Dict[str, Any],
+    Dict[str, int],
+    Dict[str, int],
+    Dict[str, str],
+]:
+    """Read the active sales and work once, then normalize the caller's three answers."""
+    active_sales = [
+        row
+        for row in show_and_sell_sale_models.event_sale_rows(event_id)
+        if str(row.get(show_and_sell_sale_models.STATUS_ATTRIBUTE)) == show_and_sell_sale_models.SALE_STATUS_ACTIVE
+    ]
+    calculated_cash = sum(
+        sale_payment_models.expected_cash_cents(
+            row[show_and_sell_sale_models.PAYMENT_SNAPSHOT_ATTRIBUTE],
+            row[show_and_sell_sale_models.TOTAL_CENTS_ATTRIBUTE],
+        )
+        for row in active_sales
+    )
+    returns, cash, rounding = _finalization_input(payload, calculated_cash)
+    minutes_by_profile, campaign_by_profile = _preview_eligible_work(event_id)
+    return active_sales, returns, cash, rounding, minutes_by_profile, campaign_by_profile
+
+
+def _approved_shares(
+    event_row: Mapping[str, Any],
+    active_sales: Sequence[Mapping[str, Any]],
+    minutes_by_profile: Mapping[str, int],
+    rounding: Mapping[str, int],
+) -> Tuple[int, Dict[str, int]]:
+    """Split the whole pool across confirmed work and require every cent to be routed."""
+    fm = show_and_sell_finalization_models
+    whole_pool = fm.whole_pool_cents(active_sales)
+    shares = fm.base_shares(
+        whole_pool_cents=whole_pool,
+        split_method=str(event_row[show_and_sell_models.SPLIT_METHOD_ATTRIBUTE]),
+        eligible_work=list(minutes_by_profile.items()),
+    )
+    unassigned = fm.unassigned_cents(whole_pool, shares)
+    if whole_pool > 0 and not shares:
+        raise AppError(
+            ErrorCode.INVALID_INPUT,
+            "a pool with cents needs confirmed work before it can be split (SPLIT-03)",
+            details={"subcode": "NO_CONFIRMED_WORK"},
+        )
+    fm.validate_rounding_draft(rounding, eligible_profile_ids=list(shares), unassigned=unassigned)
+    if sum(rounding.values()) != unassigned:
+        raise AppError(
+            ErrorCode.INVALID_INPUT,
+            "every unassigned cent must be assigned before approval (SPLIT-10)",
+            details={
+                "subcode": "ROUNDING_CENTS_UNASSIGNED",
+                "assignedCents": sum(rounding.values()),
+                "unassignedCents": unassigned,
+            },
+        )
+    return whole_pool, shares
+
+
+def _finalization_rows(
+    *,
+    event_row: Mapping[str, Any],
+    expected_version: int,
+    finalization_id: str,
+    caller_id: str,
+    now_iso: str,
+    cash: Mapping[str, Any],
+    whole_pool: int,
+    shares: Mapping[str, int],
+    campaign_by_profile: Mapping[str, str],
+    minutes_by_profile: Mapping[str, int],
+    rounding: Mapping[str, int],
+    active_sales: Sequence[Mapping[str, Any]],
+    warnings: Sequence[Mapping[str, Any]],
+) -> Tuple[Dict[str, Any], List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Build the immutable version, its credit set, and the two input snapshots."""
+    fm = show_and_sell_finalization_models
+    event_id = str(event_row[show_and_sell_models.SHOW_AND_SELL_ID_ATTRIBUTE])
+    finalization = fm.build_finalization_row(
+        show_and_sell_id=event_id,
+        unit_campaign_id=str(event_row[show_and_sell_models.UNIT_CAMPAIGN_ID_ATTRIBUTE]),
+        finalization_id=finalization_id,
+        version_number=1,
+        whole_pool_cents=whole_pool,
+        split_method=str(event_row[show_and_sell_models.SPLIT_METHOD_ATTRIBUTE]),
+        cash=cash,
+        previous_finalization_id=None,
+        approved_by_account_id=caller_id,
+        approved_at=now_iso,
+        source_event_version=expected_version,
+        warnings=warnings,
+    )
+    credits = _finalization_credit_rows(
+        finalization, shares, campaign_by_profile, minutes_by_profile, rounding, now_iso
+    )
+    sale_snapshots = [
+        fm.build_sale_snapshot_row(finalization_id, sale, show_and_sell_id=event_id) for sale in active_sales
+    ]
+    work_snapshots = [
+        fm.build_work_snapshot_row(
+            finalization_id=finalization_id,
+            show_and_sell_id=event_id,
+            slot_id=row[show_and_sell_models.SLOT_ID_ATTRIBUTE],
+            profile_id=row[show_and_sell_models.PROFILE_ID_ATTRIBUTE],
+            campaign_id=row[show_and_sell_models.CAMPAIGN_ID_ATTRIBUTE],
+            actual_minutes=row[show_and_sell_models.ACTUAL_MINUTES_ATTRIBUTE],
+            source_signup_version=row["version"],
+        )
+        for row in show_and_sell_models.event_signup_rows(event_id)
+        if str(row.get(show_and_sell_models.STATUS_ATTRIBUTE)) == show_and_sell_models.SIGNUP_ACTIVE
+        and int(row.get(show_and_sell_models.ACTUAL_MINUTES_ATTRIBUTE) or 0) > 0
+    ]
+    return finalization, credits, sale_snapshots, work_snapshots
+
+
+def _scoped_totals(credits: Sequence[Dict[str, Any]], now_iso: str) -> List[Dict[str, Any]]:
+    """One running total per Scout Campaign, paired with the version it was read at.
+
+    The arithmetic and the write condition must come from ONE read. Re-reading the
+    total while staging would compute this approval's amount from an older row and
+    protect it with a newer version, letting a concurrent approval's cents vanish.
+    """
+    fm = show_and_sell_finalization_models
+    by_campaign: Dict[str, List[Dict[str, Any]]] = {}
+    for credit in credits:
+        by_campaign.setdefault(str(credit[fm.CAMPAIGN_ID_ATTRIBUTE]), []).append(credit)
+    totals: List[Dict[str, Any]] = []
+    for campaign, group in by_campaign.items():
+        existing = fm.load_campaign_total(str(group[0][fm.UNIT_CAMPAIGN_ID_ATTRIBUTE]), campaign)
+        total: Optional[Dict[str, Any]] = existing
+        for credit in group:
+            total = fm.apply_approved_credit(total, credit=credit, updated_at=now_iso)
+        totals.append({"existing": existing, "total": total})
+    return totals
+
+
+def _stage_documents(
+    plan: Any,
+    finalization: Mapping[str, Any],
+    sale_snapshots: Sequence[Mapping[str, Any]],
+    work_snapshots: Sequence[Mapping[str, Any]],
+) -> None:
+    """Stage the version row and its two immutable input snapshots."""
+    plan.add(*_put_new_row(tables.show_and_sells.table_name, finalization))
+    for snapshot in sale_snapshots:
+        plan.add(*_put_new_row(tables.show_and_sells.table_name, snapshot))
+    for snapshot in work_snapshots:
+        plan.add(*_put_new_row(tables.show_and_sells.table_name, snapshot))
+
+
+def _stage_source_checks(
+    plan: Any,
+    event_id: str,
+    active_sales: Sequence[Mapping[str, Any]],
+    obligations: Sequence[Mapping[str, Any]],
+) -> None:
+    """Pin every source the snapshots copied, so no frozen answer describes a moved row."""
+    for sale in active_sales:
+        plan.add(
+            *_version_check(
+                tables.show_and_sells.table_name,
+                show_and_sell_sale_models.sale_key(event_id, str(sale[show_and_sell_sale_models.SALE_ID_ATTRIBUTE])),
+                int(sale[show_and_sell_sale_models.REVISION_ATTRIBUTE]),
+                attribute=show_and_sell_sale_models.REVISION_ATTRIBUTE,
+            )
+        )
+    for signup in show_and_sell_models.event_signup_rows(event_id):
+        if (
+            str(signup.get(show_and_sell_models.STATUS_ATTRIBUTE)) == show_and_sell_models.SIGNUP_ACTIVE
+            and int(signup.get(show_and_sell_models.ACTUAL_MINUTES_ATTRIBUTE) or 0) > 0
+        ):
+            plan.add(
+                *_version_check(
+                    tables.show_and_sells.table_name,
+                    {"pk": str(signup["pk"]), "sk": str(signup["sk"])},
+                    int(signup["version"]),
+                )
+            )
+    for obligation in obligations:
+        plan.add(
+            *_version_check(
+                tables.show_and_sells.table_name,
+                {"pk": str(obligation["pk"]), "sk": str(obligation["sk"])},
+                int(obligation["version"]),
+            )
+        )
+
+
+def _stage_returns(
+    plan: Any,
+    campaign_id: str,
+    return_plans: Sequence[Mapping[str, Any]],
+    balances: Mapping[str, Tuple[Optional[Dict[str, Any]], int]],
+    now_iso: str,
+) -> None:
+    """Release each assigned remainder, write reasoned adjustments, and pin balances."""
+    for plan_line in return_plans:
+        allocation = plan_line["allocation"]
+        plan.add(
+            *show_and_sell_models.release_allocation_action(
+                allocation=allocation,
+                released_total=int(plan_line["releasedQty"]),
+                updated_at=now_iso,
+            )
+        )
+        plan.add(*_put_new_row(tables.show_and_sells.table_name, plan_line["line"]))
+        plan.add(*inventory_models.put_inventory_movement_action(plan_line["movement"]))
+    physical_delta: Dict[str, int] = {product_id: 0 for product_id in balances}
+    for plan_line in return_plans:
+        product_id = str(plan_line["productId"])
+        physical_delta[product_id] += int(plan_line["movement"][inventory_models.KERNEL_PHYSICAL_DELTA])
+    for product_id, (balance, version) in balances.items():
+        if balance is not None:
+            plan.add(
+                *inventory_models.inventory_balance_delta_action(
+                    unit_campaign_id=campaign_id,
+                    product_id=product_id,
+                    existing=balance,
+                    expected_version=version - 1,
+                    kernel_physical_delta=physical_delta[product_id],
+                    now_iso=now_iso,
+                )
+            )
+
+
+def _stage_reductions(
+    plan: Any,
+    reductions: Sequence[Mapping[str, Any]],
+    later_events: Mapping[str, Mapping[str, Any]],
+    caller_id: str,
+    now_iso: str,
+) -> None:
+    """Cut later allocations and bump every affected event's version in one write.
+
+    An automatic reduction changed the event's allocation, so its metadata version
+    has to move with it: an admin editing with the version they read before this
+    approval must conflict, not overwrite the reduction. Unaffected competitors stay
+    condition-checked because their stock picture was part of this decision.
+    """
+    for reduction in reductions:
+        allocation = reduction["allocation"]
+        plan.add(
+            *show_and_sell_models.assignment_allocation_action(
+                allocation=allocation,
+                allocated_qty=int(reduction["assignedQty"]),
+                remaining_qty=int(allocation[inventory_models.REMAINING_QTY]) - int(reduction["reduction"]),
+                updated_at=now_iso,
+            )
+        )
+        plan.add(*inventory_models.put_inventory_movement_action(reduction["movement"]))
+    affected = {str(reduction["eventRow"][show_and_sell_models.SHOW_AND_SELL_ID_ATTRIBUTE]) for reduction in reductions}
+    for other_id, other in later_events.items():
+        if other_id in affected:
+            plan.add(
+                *show_and_sell_models.update_event_settings_action(
+                    show_and_sell_id=other_id,
+                    expected_version=int(other[show_and_sell_models.VERSION_ATTRIBUTE]),
+                    changes={},
+                    updated_by_account_id=caller_id,
+                    updated_at=now_iso,
+                )
+            )
+        else:
+            plan.add(
+                *_version_check(
+                    tables.show_and_sells.table_name,
+                    show_and_sell_models.event_metadata_key(other_id),
+                    int(other[show_and_sell_models.VERSION_ATTRIBUTE]),
+                )
+            )
+
+
+def _total_update_action(
+    total: Mapping[str, Any], existing: Mapping[str, Any], now_iso: str
+) -> Tuple[str, Dict[str, Any]]:
+    """One versioned projection update; the ConditionCheck is the Update's own."""
+    fm = show_and_sell_finalization_models
+    return (
+        "Update",
+        {
+            "TableName": tables.unit_campaigns.table_name,
+            "Key": wire_key(
+                fm.total_key(str(total[fm.UNIT_CAMPAIGN_ID_ATTRIBUTE]), str(total[fm.CAMPAIGN_ID_ATTRIBUTE]))
+            ),
+            "UpdateExpression": "SET #amount = :amount, #version = :version, #updatedAt = :updatedAt",
+            "ConditionExpression": "#version = :expectedVersion",
+            "ExpressionAttributeNames": {
+                "#amount": fm.APPROVED_AMOUNT_CENTS_ATTRIBUTE,
+                "#version": "version",
+                "#updatedAt": "updatedAt",
+            },
+            "ExpressionAttributeValues": {
+                ":amount": wire_value(total[fm.APPROVED_AMOUNT_CENTS_ATTRIBUTE]),
+                ":version": wire_value(total["version"]),
+                ":updatedAt": wire_value(now_iso),
+                ":expectedVersion": wire_value(int(existing["version"])),
+            },
+            "ReturnValuesOnConditionCheckFailure": "ALL_OLD",
+        },
+    )
+
+
+def _stage_credits_and_totals(
+    plan: Any, credits: Sequence[Mapping[str, Any]], totals: Sequence[Mapping[str, Any]], now_iso: str
+) -> None:
+    """Publish each Scout's immutable credit and its Unit-Campaign-scoped running total."""
+    for credit in credits:
+        plan.add(*_put_new_row(tables.show_and_sells.table_name, credit))
+    for entry in totals:
+        existing = entry["existing"]
+        total = entry["total"]
+        if existing is None:
+            plan.add(*_put_new_row(tables.unit_campaigns.table_name, total))
+        else:
+            plan.add(*_total_update_action(total, existing, now_iso))
+
+
+def _finalize_show_and_sell(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
+    """Approve an ended event in one atomic transaction (§5.2).
+
+    Every source is read before a single action is staged: the event, its active sales
+    and confirmed work, its We Owe obligations, every allocated product's balance and
+    allocations, and the later events competing for the same stock. All of their
+    versions are conditions on the one transaction, so a change to any source cancels
+    the whole approval — there is no path that publishes half a version, and no second
+    write owner for the approved pointer.
+    """
+    log = get_logger(__name__)
+    payload = _require_input(event)
+    key = _idempotency_key(payload)
+    fingerprint = _update_fingerprint(payload)
+    event_id = _resource_id(payload, SHOW_AND_SELL_ID_ARGUMENT)
+    expected_version = _expected_version(payload)
+    event_row = show_and_sell_models.load_show_and_sell_or_not_found(event_id)
+    unit_auth.require_unit_admin(caller_id, str(event_row[show_and_sell_models.UNIT_ID_ATTRIBUTE]))
+
+    runner = IdempotentMutationRunner()
+    keys = _show_and_sell_marker(
+        caller_id=caller_id, operation=FINALIZE_SHOW_AND_SELL_FIELD, scope=event_id, idempotency_key=key
+    )
+    result_id = f"{event_id}:{show_and_sell_finalization_models.new_finalization_id()}"
+    replayed = _replay(runner, keys, fingerprint, FINALIZE_SHOW_AND_SELL_FIELD, _load_finalization_answer)
+    if replayed is not None:
+        return replayed
+
+    _require_read_version(event_row, expected_version)
+    state = show_and_sell_models.derive_event_status(event_row)
+    if state != show_and_sell_models.STATUS_ENDED:
+        raise AppError(
+            ErrorCode.CONFLICT,
+            "only an ended event can take its first finalization",
+            details={"subcode": "FINALIZATION_STATE_INVALID", "status": state},
+        )
+
+    now_iso = utc_now_iso()
+    finalization_id = result_id.partition(":")[2]
+    active_sales, returns, cash, rounding, minutes, campaigns = _finalization_sources(event_id, payload)
+    whole_pool, shares = _approved_shares(event_row, active_sales, minutes, rounding)
+    return_plans, balances = _return_plans(event_row, returns, finalization_id, caller_id, key, now_iso)
+    reductions, later_events = _later_reduction_plans(
+        event_row, balances, return_plans, finalization_id, caller_id, key, now_iso
+    )
+    warnings = _finalization_warnings(reductions)
+    finalization, credits, sale_snapshots, work_snapshots = _finalization_rows(
+        event_row=event_row,
+        expected_version=expected_version,
+        finalization_id=finalization_id,
+        caller_id=caller_id,
+        now_iso=now_iso,
+        cash=cash,
+        whole_pool=whole_pool,
+        shares=shares,
+        campaign_by_profile=campaigns,
+        minutes_by_profile=minutes,
+        rounding=rounding,
+        active_sales=active_sales,
+        warnings=warnings,
+    )
+    obligations = [
+        row
+        for row in show_and_sell_models.event_we_owe_rows(event_id)
+        if str(row.get("entityType")) == show_and_sell_sale_models.WE_OWE_ENTITY_TYPE
+    ]
+    totals = _scoped_totals(credits, now_iso)
+
+    # The budget is checked against the actions the transaction will really send,
+    # not against a parallel estimate that can drift whenever a write is added.
+    plan = WritePlan(max_actions=MAX_TRANSACTION_ACTIONS)
+    runner.stage_marker(plan, keys, fingerprint=fingerprint, result_id=result_id)
+    _stage_documents(plan, finalization, sale_snapshots, work_snapshots)
+    _stage_source_checks(plan, event_id, active_sales, obligations)
+    _stage_returns(
+        plan, str(event_row[show_and_sell_models.UNIT_CAMPAIGN_ID_ATTRIBUTE]), return_plans, balances, now_iso
+    )
+    _stage_reductions(plan, reductions, later_events, caller_id, now_iso)
+    _stage_credits_and_totals(plan, credits, totals, now_iso)
+    plan.add(*_finalization_event_action(event_id, expected_version, finalization_id, caller_id, now_iso))
+    planned_actions = plan.action_count
+    committed = {
+        "eventRow": _finalized_event_row(event_row, expected_version, finalization_id, caller_id, now_iso),
+        "finalization": finalization,
+        "credits": credits,
+        "warnings": warnings,
+    }
+    build_result = _once(lambda: _finalization_answer(event_id, finalization_id, committed=committed))
+
+    committed_result = runner.execute(
+        keys,
+        plan,
+        operation=FINALIZE_SHOW_AND_SELL_FIELD,
+        fingerprint=fingerprint,
+        result_id=result_id,
+        load_result=_load_finalization_answer,
+        result_payload=build_result,
+    )
+    if not isinstance(committed_result, str):
+        # An identical request won the marker race between this handler's replay
+        # check and the transaction. The runner already holds that request's
+        # answer; this plan never committed and its generated id names no row.
+        return dict(committed_result)
+    answer = build_result()
+    log.info(
+        "Show & Sell finalized",
+        show_and_sell_id=event_id,
+        finalization_id=finalization_id,
+        credits=len(credits),
+        reductions=len(reductions),
+        planned_actions=planned_actions,
+    )
+    return answer
 
 
 def _show_and_sell_finalizations(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
@@ -8816,7 +9831,13 @@ def _stage_sale_event_write(
     )
 
 
-def _sale_feasible(event_row: Mapping[str, Any], product_ids: Sequence[str], *, sale_delta: int) -> None:
+def _sale_feasible(
+    event_row: Mapping[str, Any],
+    product_ids: Sequence[str],
+    *,
+    sale_delta: int,
+    obligation_delta: int = 0,
+) -> None:
     """Refuse a sale write that would leave the event no longer finalizable inside the budget (§8.10).
 
     §8.10's preflight is over the event, not this write: every allocated product, every
@@ -8824,27 +9845,15 @@ def _sale_feasible(event_row: Mapping[str, Any], product_ids: Sequence[str], *, 
     finalization has to make, so a sale that pushed the whole set over 90 actions would
     leave an event no version could publish. The participant terms come from the same
     ``active_signups`` count the work confirmation budgets against, which keeps the two
-    preflights one arithmetic rather than two that happen to agree today.
+    preflights one arithmetic rather than two that happen to agree today. A sale that
+    creates We Owe lines also adds one condition per new obligation, which is why the
+    caller supplies ``obligation_delta`` instead of letting this estimate go stale.
     """
-    event_id = str(event_row[show_and_sell_models.SHOW_AND_SELL_ID_ATTRIBUTE])
-    active_sales = [
-        row
-        for row in show_and_sell_sale_models.event_sale_rows(event_id)
-        if str(row.get(show_and_sell_sale_models.STATUS_ATTRIBUTE) or "")
-        == show_and_sell_sale_models.SALE_STATUS_ACTIVE
-    ]
-    confirmed_work_rows = 0
-    participating_scouts: set[str] = set()
-    for signup in show_and_sell_models.active_signups(event_id):
-        if int(signup.get(show_and_sell_models.ACTUAL_MINUTES_ATTRIBUTE) or 0) > 0:
-            confirmed_work_rows += 1
-            participating_scouts.add(str(signup[show_and_sell_models.PROFILE_ID_ATTRIBUTE]))
-    allocation_models.require_finalization_feasible(
+    _require_event_finalization_feasible(
+        event_row,
         len(product_ids),
-        MAX_TRANSACTION_ACTIONS,
-        confirmed_work_rows=confirmed_work_rows,
-        participating_scouts=len(participating_scouts),
-        sale_count=len(active_sales) + sale_delta,
+        sale_delta=sale_delta,
+        obligation_delta=obligation_delta,
     )
 
 
@@ -9018,7 +10027,12 @@ def _create_show_and_sell_sale(event: Dict[str, Any], caller_id: str) -> Dict[st
     product_ids = _sale_product_ids(
         event_row, sorted({str(line[show_and_sell_sale_models.PRODUCT_ID_ATTRIBUTE]) for line in line_items})
     )
-    _sale_feasible(event_row, product_ids, sale_delta=1)
+    _sale_feasible(
+        event_row,
+        product_ids,
+        sale_delta=1,
+        obligation_delta=sum(1 for line in line_items if int(line[show_and_sell_sale_models.WE_OWE_QTY_ATTRIBUTE]) > 0),
+    )
 
     plan = WritePlan()
     runner.stage_marker(plan, keys, fingerprint=fingerprint, result_id=f"{event_id}:{sale_id}")
@@ -9146,7 +10160,7 @@ def _correct_show_and_sell_sale(event: Dict[str, Any], caller_id: str) -> Dict[s
     product_ids = _sale_product_ids(
         event_row, sorted({str(line[show_and_sell_sale_models.PRODUCT_ID_ATTRIBUTE]) for line in line_items})
     )
-    _sale_feasible(event_row, product_ids, sale_delta=0)
+    _sale_feasible(event_row, product_ids, sale_delta=0, obligation_delta=len(created))
 
     plan = WritePlan()
     runner.stage_marker(plan, keys, fingerprint=fingerprint, result_id=f"{event_id}:{sale_id}")
@@ -9851,6 +10865,7 @@ _RESOLVERS: Dict[str, Callable[[Dict[str, Any], str], Any]] = {
     CREATE_SHOW_AND_SELL_FIELD: _create_show_and_sell,
     UPDATE_SHOW_AND_SELL_FIELD: _update_show_and_sell,
     UPDATE_ROUNDING_DRAFT_FIELD: _update_rounding_draft,
+    FINALIZE_SHOW_AND_SELL_FIELD: _finalize_show_and_sell,
     CANCEL_SHOW_AND_SELL_FIELD: _cancel_show_and_sell,
     SHOW_AND_SELL_FIELD: _show_and_sell,
     SHOW_AND_SELLS_FIELD: _show_and_sells,

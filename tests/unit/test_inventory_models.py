@@ -842,6 +842,9 @@ def test_a_history_read_applies_every_filter_it_was_given(inventory_table: Any) 
     campaign_wide = inv.list_inventory_movements(CAMPAIGN)
     assert [row["movementId"] for row in campaign_wide] == ["mov-0", "mov-1", "mov-scout", "mov-2"]
 
+    strongly_consistent = inv.list_inventory_movements(CAMPAIGN, consistent=True)
+    assert [row["movementId"] for row in strongly_consistent] == ["mov-0", "mov-1", "mov-scout", "mov-2"]
+
     product_only = inv.list_inventory_movements(CAMPAIGN, product_id=PRODUCT)
     assert [row["movementId"] for row in product_only] == ["mov-0", "mov-1", "mov-2"]
 

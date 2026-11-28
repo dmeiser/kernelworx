@@ -106,10 +106,19 @@ FINALIZATION_ACTIONS_PER_ALLOCATED_PRODUCT = 4
 #: work-confirmation resolvers own the two counts; this module owns the arithmetic, so the
 #: preflight a Kernel is refused by and the budget finalization is planned against are one
 #: formula rather than two that happen to agree today.
-FINALIZATION_ACTIONS_PER_CONFIRMED_SIGNUP = 1
+#: One confirmed signup costs two actions at approval: the immutable work snapshot
+#: and the version condition that pins the signup it copied. Pricing it at one lets
+#: a work confirmation admit an event that approval then refuses at the ceiling.
+FINALIZATION_ACTIONS_PER_CONFIRMED_SIGNUP = 2
 FINALIZATION_ACTIONS_PER_PARTICIPATING_SCOUT = 2
-#: §9's ``S`` term: one sale snapshot write per ACTIVE sale the finalization walks.
-FINALIZATION_ACTIONS_PER_SALE = 1
+#: §9's ``O`` term: each We Owe row is condition-checked so a frozen answer cannot
+#: describe an obligation that was fulfilled or cancelled while approval was planned.
+FINALIZATION_ACTIONS_PER_WE_OWE_OBLIGATION = 1
+#: §9's ``S`` term: each ACTIVE sale costs two actions at approval, not one — an
+#: immutable sale snapshot and the version condition that pins the sale it copied.
+#: Pricing a sale at one action lets the assignment preflight admit a batch that
+#: finalization then refuses at the 90-action ceiling.
+FINALIZATION_ACTIONS_PER_SALE = 2
 
 #: The movement type a target change of this sign is audited as (§5.8): an increase is an
 #: assignment, a decrease is a manual reduction. A zero delta writes nothing, so it has
@@ -618,6 +627,7 @@ def minimum_finalization_action_count(
     confirmed_work_rows: int = 0,
     participating_scouts: int = 0,
     sale_count: int = 0,
+    we_owe_count: int = 0,
 ) -> int:
     """The smallest write set the finalization of this event will need (§8.10).
 
@@ -631,15 +641,14 @@ def minimum_finalization_action_count(
     leaves out can only add actions, so this is a true lower bound: an event whose floor
     already busts the budget has no finalization that fits it.
 
-    The two participant terms are supplied by the callers that move them, because they are
-    domain facts rather than allocation arithmetic: ``confirmed_work_rows`` is the signups
-    whose work a Kernel confirmed (each becomes one per-slot work snapshot) and
+    The source terms are supplied by the callers that move them, because they are domain
+    facts rather than allocation arithmetic: ``confirmed_work_rows`` is the signups whose
+    work a Kernel confirmed (each becomes a work snapshot AND its source version check),
     ``participating_scouts`` is the distinct Scouts the event counts (each becomes a credit
-    record and a Scout-total projection), and ``sale_count`` is the active sales the
-    finalization must snapshot (each is one sale snapshot write — §9's ``S``). All default
-    to zero, which is exactly what the §3.2 assignment mutation may assume — an assignment
-    adds stock, not participants or sales — and
-    what keeps its call byte-identical to the estimate it was written against.
+    record and a Scout-total projection), ``sale_count`` is the active sales the event must
+    snapshot (a sale snapshot and its version condition — §9's ``S``), and ``we_owe_count``
+    is every obligation finalization must condition-check, including rows the pending write
+    creates. All default to zero, which is what a mutation that only adds stock may assume.
     """
     return (
         FINALIZATION_OVERHEAD_ACTIONS
@@ -647,6 +656,7 @@ def minimum_finalization_action_count(
         + FINALIZATION_ACTIONS_PER_CONFIRMED_SIGNUP * confirmed_work_rows
         + FINALIZATION_ACTIONS_PER_PARTICIPATING_SCOUT * participating_scouts
         + FINALIZATION_ACTIONS_PER_SALE * sale_count
+        + FINALIZATION_ACTIONS_PER_WE_OWE_OBLIGATION * we_owe_count
     )
 
 
@@ -657,6 +667,7 @@ def require_finalization_feasible(
     confirmed_work_rows: int = 0,
     participating_scouts: int = 0,
     sale_count: int = 0,
+    we_owe_count: int = 0,
 ) -> None:
     """Refuse a write that would leave an event no longer finalizable inside the budget.
 
@@ -671,6 +682,7 @@ def require_finalization_feasible(
         confirmed_work_rows=confirmed_work_rows,
         participating_scouts=participating_scouts,
         sale_count=sale_count,
+        we_owe_count=we_owe_count,
     )
     if planned <= max_actions:
         return
